@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "recording_app",
+  "productName": "MeetingRec",
   "version": "0.1.0",
-  "identifier": "com.tauri.dev",
+  "identifier": "com.meetingrec.app",
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
@@ -12,9 +12,9 @@
   "app": {
     "windows": [
       {
-        "title": "recording_app",
-        "width": 800,
-        "height": 600,
+        "title": "MeetingRec",
+        "width": 900,
+        "height": 700,
         "resizable": true,
         "fullscreen": false
       }
