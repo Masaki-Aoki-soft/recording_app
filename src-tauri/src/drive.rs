@@ -21,11 +21,14 @@ const DRIVE_FILES_URL: &str = "https://www.googleapis.com/drive/v3/files";
 /// スコープ
 const SCOPES: &str = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email";
 
-/// Google Client ID（ビルド時に環境変数から取得、もしくはデフォルト値）
+/// Google Client ID（ここにクライアントIDを直接貼り付けます）
+/// Google Client ID / Secret
+/// これらの値はコンパイル時に .env ファイルから読み込まれてバイナリに埋め込まれます。
+const GOOGLE_CLIENT_ID: &str = dotenvy_macro::dotenv!("GOOGLE_CLIENT_ID");
+const GOOGLE_CLIENT_SECRET: &str = dotenvy_macro::dotenv!("GOOGLE_CLIENT_SECRET");
+
 fn get_client_id() -> String {
-    option_env!("GOOGLE_CLIENT_ID")
-        .unwrap_or("")
-        .to_string()
+    GOOGLE_CLIENT_ID.to_string()
 }
 
 /// トークンレスポンス
@@ -196,6 +199,7 @@ async fn exchange_code_for_token(
 
     let params = [
         ("client_id", client_id),
+        ("client_secret", GOOGLE_CLIENT_SECRET),
         ("code", code),
         ("redirect_uri", redirect_uri),
         ("grant_type", "authorization_code"),
@@ -249,6 +253,7 @@ async fn refresh_access_token(app: &AppHandle) -> Result<String, String> {
 
     let params = [
         ("client_id", client_id.as_str()),
+        ("client_secret", GOOGLE_CLIENT_SECRET),
         ("refresh_token", refresh_token.as_str()),
         ("grant_type", "refresh_token"),
     ];
