@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
@@ -5,6 +6,59 @@ use tauri_plugin_store::StoreExt;
 use crate::drive;
 use crate::models::*;
 use crate::scheduler::{self, SchedulerState};
+
+// =====================================================
+// FFmpeg サイドカーバイナリのパス解決
+// =====================================================
+
+/// src-tauri/bin に配置された FFmpeg サイドカーバイナリのパスを解決する。
+/// Tauri のビルドシステムが externalBin で指定されたバイナリを
+/// 実行ファイルと同じディレクトリにコピーするため、current_exe() の
+/// 親ディレクトリから検索する。
+fn resolve_ffmpeg_path() -> Result<PathBuf, String> {
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| format!("Failed to get current exe path: {}", e))?
+        .parent()
+        .ok_or_else(|| "Failed to get exe directory".to_string())?
+        .to_path_buf();
+
+    let binary_name = if cfg!(windows) {
+        format!("ffmpeg-{}.exe", env!("TAURI_ENV_TARGET_TRIPLE"))
+    } else {
+        format!("ffmpeg-{}", env!("TAURI_ENV_TARGET_TRIPLE"))
+    };
+
+    // 1. exeと同じディレクトリ（本番環境＆コピー済み開発環境）
+    let path1 = exe_dir.join(&binary_name);
+    if path1.exists() {
+        return Ok(path1);
+    }
+
+    // 2. 開発環境のフォールバック (src-tauri/bin)
+    // target/debug から target, src-tauri へと遡る
+    if let (Some(target_dir), Some(src_tauri_dir)) = (exe_dir.parent(), exe_dir.parent().and_then(|p| p.parent())) {
+        let path2 = src_tauri_dir.join("bin").join(&binary_name);
+        if path2.exists() {
+            return Ok(path2);
+        }
+    }
+
+    // 3. コマンド実行ディレクトリからの相対パス
+    let path3 = std::env::current_dir()
+        .unwrap_or_default()
+        .join("bin")
+        .join(&binary_name);
+    if path3.exists() {
+        return Ok(path3);
+    }
+
+    Err(format!(
+        "FFmpeg sidecar not found. Make sure {} is placed in src-tauri/bin/. Searched paths: {}, {}",
+        binary_name,
+        path1.display(),
+        exe_dir.join("../../bin").join(&binary_name).display()
+    ))
+}
 
 // =====================================================
 // スケジュール関連コマンド
@@ -243,43 +297,7 @@ pub async fn get_recordings_dir() -> Result<String, String> {
 /// 録音デバイスの一覧を取得
 #[tauri::command]
 pub async fn get_audio_devices() -> Result<Vec<String>, String> {
-    use std::process::Command;
-
-    let output = Command::new("ffmpeg")
-        .args(&["-list_devices", "true", "-f", "dshow", "-i", "dummy"])
-        .output()
-        .map_err(|e| format!("FFmpeg execution failed: {}", e))?;
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let mut devices = Vec::new();
-    let mut in_audio_section = false;
-
-    for line in stderr.lines() {
-        if line.contains("DirectShow audio devices") {
-            in_audio_section = true;
-            continue;
-        }
-        if line.contains("DirectShow video devices") {
-            in_audio_section = false;
-            continue;
-        }
-        
-        if in_audio_section {
-            if line.contains("Alternative name") {
-                continue;
-            }
-            if let Some(start) = line.find('"') {
-                if let Some(end) = line[start + 1..].find('"') {
-                    let device_name = &line[start + 1..start + 1 + end];
-                    if !devices.contains(&device_name.to_string()) {
-                        devices.push(device_name.to_string());
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(devices)
+    crate::audio_capture::get_host_mic_devices()
 }
 
 // =====================================================
@@ -312,6 +330,9 @@ pub async fn start_recording(
         _ => "1920x1080",
     };
 
+    let mut input_count = 1; // video (desktop) is input 0
+    let mut audio_inputs = 0;
+
     args.push("-f".to_string());
     args.push("gdigrab".to_string());
     args.push("-framerate".to_string());
@@ -321,28 +342,81 @@ pub async fn start_recording(
     args.push("-i".to_string());
     args.push("desktop".to_string());
 
+    state.audio_is_running.store(true, std::sync::atomic::Ordering::SeqCst);
+    let mut local_streams = Vec::new();
+
     if config.capture_system_audio {
-        args.push("-f".to_string());
-        args.push("dshow".to_string());
         if let Some(dev) = &config.audio_device {
-            args.push("-i".to_string());
-            args.push(format!("audio={}", dev));
-        } else {
-            args.push("-i".to_string());
-            args.push("audio=virtual-audio-capturer".to_string());
+            if !dev.is_empty() {
+                let pipe_name = format!("tauri_sys_{}", timestamp);
+                match crate::audio_capture::start_capture_stream(
+                    dev.clone(),
+                    false, // is_input = false means loopback of an output
+                    pipe_name.clone(),
+                    state.audio_is_running.clone(),
+                ).await {
+                    Ok((stream, _, sample_rate, channels)) => {
+                        local_streams.push(stream);
+                        args.push("-f".to_string());
+                        args.push("f32le".to_string());
+                        args.push("-ar".to_string());
+                        args.push(sample_rate.to_string());
+                        args.push("-ac".to_string());
+                        args.push(channels.to_string());
+                        args.push("-i".to_string());
+                        args.push(format!(r"\\.\pipe\{}", pipe_name));
+                        input_count += 1;
+                        audio_inputs += 1;
+                    }
+                    Err(e) => {
+                        log::error!("Failed to start system audio stream: {}", e);
+                    }
+                }
+            }
         }
     }
 
     if config.capture_mic {
-        args.push("-f".to_string());
-        args.push("dshow".to_string());
         if let Some(dev) = &config.mic_device {
-            args.push("-i".to_string());
-            args.push(format!("audio={}", dev));
-        } else {
-            args.push("-i".to_string());
-            args.push("audio=Microphone".to_string());
+            if !dev.is_empty() {
+                let pipe_name = format!("tauri_mic_{}", timestamp);
+                match crate::audio_capture::start_capture_stream(
+                    dev.clone(),
+                    true, // is_input = true
+                    pipe_name.clone(),
+                    state.audio_is_running.clone(),
+                ).await {
+                    Ok((stream, _, sample_rate, channels)) => {
+                        local_streams.push(stream);
+                        args.push("-f".to_string());
+                        args.push("f32le".to_string());
+                        args.push("-ar".to_string());
+                        args.push(sample_rate.to_string());
+                        args.push("-ac".to_string());
+                        args.push(channels.to_string());
+                        args.push("-i".to_string());
+                        args.push(format!(r"\\.\pipe\{}", pipe_name));
+                        input_count += 1;
+                        audio_inputs += 1;
+                    }
+                    Err(e) => {
+                        log::error!("Failed to start mic audio stream: {}", e);
+                    }
+                }
+            }
         }
+    }
+
+    if audio_inputs > 1 {
+        // 複数オーディオの場合はミックスする
+        args.push("-filter_complex".to_string());
+        args.push(format!("amix=inputs={}:duration=first:dropout_transition=2", audio_inputs));
+    }
+
+    {
+        let mut audio_streams = state.audio_streams.lock().unwrap();
+        audio_streams.clear();
+        audio_streams.append(&mut local_streams);
     }
 
     args.push("-pix_fmt".to_string());
@@ -359,15 +433,28 @@ pub async fn start_recording(
     args.push("128k".to_string());
     args.push(filepath.clone());
 
+    let ffmpeg_path = resolve_ffmpeg_path()?;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let child = Command::new("ffmpeg")
+    let mut child = Command::new(&ffmpeg_path)
         .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped()) // Capture stderr for debugging!
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .map_err(|e| format!("Failed to start FFmpeg: {}", e))?;
+
+    if let Some(stderr) = child.stderr.take() {
+        std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader};
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    log::info!("FFmpeg: {}", line);
+                }
+            }
+        });
+    }
 
     *state.ffmpeg_process.lock().unwrap() = Some(child);
     *state.output_path.lock().unwrap() = Some(filepath.clone());
@@ -377,6 +464,13 @@ pub async fn start_recording(
 
 #[tauri::command]
 pub async fn stop_recording(state: tauri::State<'_, crate::AppState>) -> Result<String, String> {
+    // 録音スレッドを停止
+    state.audio_is_running.store(false, std::sync::atomic::Ordering::SeqCst);
+    {
+        let mut audio_streams = state.audio_streams.lock().unwrap();
+        audio_streams.clear(); // Drop causes cpal to stop capturing
+    }
+
     let mut process_lock = state.ffmpeg_process.lock().unwrap();
     if let Some(mut child) = process_lock.take() {
         if let Some(mut stdin) = child.stdin.take() {

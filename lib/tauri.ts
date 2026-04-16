@@ -3,7 +3,6 @@
  */
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { Command, type Child } from '@tauri-apps/plugin-shell';
 
 // =====================================================
 // 型定義
@@ -32,6 +31,7 @@ export interface RecordingConfig {
     capture_system_audio: boolean;
     capture_mic: boolean;
     audio_device: string | null;
+    mic_device: string | null;
 }
 
 export interface DriveConfig {
@@ -123,6 +123,10 @@ export async function getRecordingsDir(): Promise<string> {
     return invoke<string>('get_recordings_dir');
 }
 
+export async function getAudioDevices(): Promise<string[]> {
+    return invoke<string[]>('get_audio_devices');
+}
+
 // =====================================================
 // FFmpeg 録画マネージャー（@tauri-apps/plugin-shell で制御）
 // =====================================================
@@ -130,7 +134,6 @@ export async function getRecordingsDir(): Promise<string> {
 export type RecordingStatus = 'idle' | 'recording' | 'stopping' | 'uploading';
 
 export class RecordingManager {
-    private process: Child | null = null;
     private startTime: Date | null = null;
     private outputPath: string = '';
     private _status: RecordingStatus = 'idle';
@@ -173,46 +176,13 @@ export class RecordingManager {
             throw new Error('Already recording');
         }
 
-        // 保存先ディレクトリを取得
-        const recordingsDir = await getRecordingsDir();
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        this.outputPath = `${recordingsDir}\\MeetingRec_${timestamp}.mp4`;
-
-        // FFmpeg コマンド引数を構築
-        const args = this.buildFfmpegArgs(config, this.outputPath);
-
-        console.log('Starting FFmpeg with args:', args);
-
         try {
-            const command = Command.create('ffmpeg', args);
-
-            command.stdout.on('data', (line: string) => {
-                this.onLog?.(`[stdout] ${line}`);
-            });
-
-            command.stderr.on('data', (line: string) => {
-                this.onLog?.(`[stderr] ${line}`);
-            });
-
-            command.on('close', (data) => {
-                console.log('FFmpeg process exited with code:', data.code);
-                if (this._status === 'stopping') {
-                    this.setStatus('idle');
-                }
-                this.process = null;
-            });
-
-            command.on('error', (error: string) => {
-                console.error('FFmpeg error:', error);
-                this.onError?.(error);
-                this.setStatus('idle');
-                this.process = null;
-            });
-
-            this.process = await command.spawn();
+            console.log('Starting FFmpeg via Rust backend...');
+            const outputPath = await invoke<string>('start_recording', { config });
+            this.outputPath = outputPath;
             this.startTime = new Date();
             this.setStatus('recording');
-
+            
             console.log('FFmpeg recording started:', this.outputPath);
             return this.outputPath;
         } catch (error) {
@@ -226,28 +196,23 @@ export class RecordingManager {
      * 録画を正常停止（FFmpeg に 'q' を送信）
      */
     async stop(): Promise<string> {
-        if (!this.process || this._status !== 'recording') {
+        if (this._status !== 'recording') {
             throw new Error('Not recording');
         }
 
         this.setStatus('stopping');
 
         try {
-            // FFmpeg に 'q' を送って正常終了
-            await this.process.write(new TextEncoder().encode('q'));
-        } catch {
-            // stdin write が失敗した場合は kill
-            try {
-                await this.process.kill();
-            } catch {
-                // ignore
-            }
+            const outputPath = await invoke<string>('stop_recording');
+            this.outputPath = outputPath;
+        } catch (error) {
+            console.error('Failed to stop recording:', error);
+            // ignore
         }
 
-        // プロセス終了を少し待つ
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        // プロセス終了を少し待つ (UIのチラツキ防止)
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
-        this.process = null;
         this.setStatus('idle');
 
         return this.outputPath;
@@ -257,13 +222,12 @@ export class RecordingManager {
      * 録画を強制終了
      */
     async kill(): Promise<void> {
-        if (this.process) {
+        if (this._status === 'recording') {
             try {
-                await this.process.kill();
+                await invoke<string>('stop_recording');
             } catch {
                 // ignore
             }
-            this.process = null;
             this.setStatus('idle');
         }
     }
@@ -274,56 +238,6 @@ export class RecordingManager {
     getElapsedSeconds(): number {
         if (!this.startTime) return 0;
         return Math.floor((Date.now() - this.startTime.getTime()) / 1000);
-    }
-
-    /**
-     * FFmpeg引数を構築（Windows gdigrab + dshow）
-     */
-    private buildFfmpegArgs(config: RecordingConfig, outputPath: string): string[] {
-        const args: string[] = ['-y']; // 上書き許可
-
-        // 解像度マッピング
-        const resolutionMap: Record<string, string> = {
-            '720p': '1280x720',
-            '1080p': '1920x1080',
-            '4k': '3840x2160',
-        };
-        const resolution = resolutionMap[config.resolution] || '1920x1080';
-
-        // 画面キャプチャ（gdigrab）
-        args.push('-f', 'gdigrab');
-        args.push('-framerate', String(config.framerate));
-        args.push('-video_size', resolution);
-        args.push('-i', 'desktop');
-
-        // システム音声（dshow - WASAPI loopback）
-        if (config.capture_system_audio) {
-            args.push('-f', 'dshow');
-            if (config.audio_device) {
-                args.push('-i', `audio=${config.audio_device}`);
-            } else {
-                // デフォルトのシステム音声デバイス
-                args.push('-i', 'audio=virtual-audio-capturer');
-            }
-        }
-
-        // マイク音声
-        if (config.capture_mic) {
-            args.push('-f', 'dshow');
-            args.push('-i', 'audio=Microphone');
-        }
-
-        // エンコード設定
-        args.push('-vcodec', 'libx264');
-        args.push('-preset', 'ultrafast'); // ライブ録画向け
-        args.push('-tune', 'zerolatency');
-        args.push('-acodec', 'aac');
-        args.push('-b:a', '128k');
-
-        // 出力ファイル
-        args.push(outputPath);
-
-        return args;
     }
 }
 

@@ -118,22 +118,26 @@ export default function DashboardPage() {
         setIsTauri(typeof window !== 'undefined' && !!window.__TAURI__);
     }, []);
 
+    const [audioDevices, setAudioDevices] = useState<string[]>([]);
+
     // --- 初期データ読み込み ---
     useEffect(() => {
         if (!isTauri) return;
 
         const loadData = async () => {
             try {
-                const [loadedSchedules, config, driveConf, auth] = await Promise.all([
+                const [loadedSchedules, config, driveConf, auth, devices] = await Promise.all([
                     listSchedules(),
                     getRecordingConfig(),
                     getDriveConfig(),
                     getAuthStatus(),
+                    import('@/lib/tauri').then(m => m.getAudioDevices()),
                 ]);
                 setSchedules(loadedSchedules);
                 setRecordingConfig(config);
                 setDriveConfigState(driveConf);
                 setAuthStatus(auth);
+                setAudioDevices(devices);
             } catch (err) {
                 console.error('Failed to load initial data:', err);
             }
@@ -555,44 +559,89 @@ export default function DashboardPage() {
                                                 {recordingConfig.resolution}
                                             </Badge>
                                         </div>
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center space-x-3">
-                                                <HardDrive className="h-5 w-5 text-zinc-500" />
-                                                <div className="space-y-0.5">
-                                                    <Label className="text-sm md:text-base cursor-pointer">
-                                                        システム音声 (相手の声)
-                                                    </Label>
-                                                    <p className="text-xs text-zinc-500">WASAPI Loopback</p>
+                                        <div className="flex flex-col space-y-3">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center space-x-3">
+                                                    <HardDrive className="h-5 w-5 text-zinc-500" />
+                                                    <div className="space-y-0.5">
+                                                        <Label className="text-sm md:text-base cursor-pointer">
+                                                            システム音声 (相手の声)
+                                                        </Label>
+                                                        <p className="text-xs text-zinc-500">仮想ステレオミキサー等</p>
+                                                    </div>
                                                 </div>
+                                                <Switch
+                                                    checked={recordingConfig.capture_system_audio}
+                                                    onCheckedChange={(checked) =>
+                                                        handleSaveRecordingConfig({
+                                                            ...recordingConfig,
+                                                            capture_system_audio: checked,
+                                                        })
+                                                    }
+                                                />
                                             </div>
-                                            <Switch
-                                                checked={recordingConfig.capture_system_audio}
-                                                onCheckedChange={(checked) =>
-                                                    handleSaveRecordingConfig({
-                                                        ...recordingConfig,
-                                                        capture_system_audio: checked,
-                                                    })
-                                                }
-                                            />
+                                            {recordingConfig.capture_system_audio && (
+                                                <div className="pl-8 col-span-2">
+                                                    <Select
+                                                        value={recordingConfig.audio_device || ''}
+                                                        onValueChange={(val) =>
+                                                            handleSaveRecordingConfig({ ...recordingConfig, audio_device: val })
+                                                        }
+                                                    >
+                                                        <SelectTrigger className="w-full text-xs h-8">
+                                                            <SelectValue placeholder="デバイスを選択 (デフォルト: virtual-audio-capturer)" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="virtual-audio-capturer">virtual-audio-capturer (デフォルト規定値)</SelectItem>
+                                                            {audioDevices.map(dev => (
+                                                                <SelectItem key={dev} value={dev}>{dev}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            )}
                                         </div>
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center space-x-3">
-                                                <Mic className="h-5 w-5 text-zinc-500" />
-                                                <div className="space-y-0.5">
-                                                    <Label className="text-sm md:text-base cursor-pointer">
-                                                        マイク (自分の声)
-                                                    </Label>
+
+                                        <div className="flex flex-col space-y-3">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center space-x-3">
+                                                    <Mic className="h-5 w-5 text-zinc-500" />
+                                                    <div className="space-y-0.5">
+                                                        <Label className="text-sm md:text-base cursor-pointer">
+                                                            マイク (自分の声)
+                                                        </Label>
+                                                    </div>
                                                 </div>
+                                                <Switch
+                                                    checked={recordingConfig.capture_mic}
+                                                    onCheckedChange={(checked) =>
+                                                        handleSaveRecordingConfig({
+                                                            ...recordingConfig,
+                                                            capture_mic: checked,
+                                                        })
+                                                    }
+                                                />
                                             </div>
-                                            <Switch
-                                                checked={recordingConfig.capture_mic}
-                                                onCheckedChange={(checked) =>
-                                                    handleSaveRecordingConfig({
-                                                        ...recordingConfig,
-                                                        capture_mic: checked,
-                                                    })
-                                                }
-                                            />
+                                            {recordingConfig.capture_mic && (
+                                                <div className="pl-8 col-span-2">
+                                                    <Select
+                                                        value={recordingConfig.mic_device || ''}
+                                                        onValueChange={(val) =>
+                                                            handleSaveRecordingConfig({ ...recordingConfig, mic_device: val })
+                                                        }
+                                                    >
+                                                        <SelectTrigger className="w-full text-xs h-8">
+                                                            <SelectValue placeholder="デバイスを選択 (デフォルト: Microphone)" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="Microphone">Microphone (デフォルト規定値)</SelectItem>
+                                                            {audioDevices.map(dev => (
+                                                                <SelectItem key={`mic_${dev}`} value={dev}>{dev}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            )}
                                         </div>
                                     </CardContent>
                                 </Card>

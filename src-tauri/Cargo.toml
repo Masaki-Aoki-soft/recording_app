@@ -33,3 +33,8 @@ uuid = { version = "1", features = ["v4"] }
 dirs = "6"
 dotenvy = "0.15.7"
 dotenvy_macro = "0.15.7"
+cpal = "0.17.1"
+hound = "3.5.1"
+ringbuf = "0.4.8"
+rubato = "1.0.1"
+dasp_sample = "0.11.0"

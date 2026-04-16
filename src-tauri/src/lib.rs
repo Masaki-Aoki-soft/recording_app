@@ -1,3 +1,4 @@
+mod audio_capture;
 mod commands;
 mod drive;
 mod models;
@@ -10,6 +11,8 @@ use log::info;
 pub struct AppState {
     pub ffmpeg_process: Mutex<Option<Child>>,
     pub output_path: Mutex<Option<String>>,
+    pub audio_streams: Mutex<Vec<cpal::Stream>>,
+    pub audio_is_running: Arc<std::sync::atomic::AtomicBool>,
 }
 use tauri::{
     Manager,
@@ -33,6 +36,8 @@ pub fn run() {
         .manage(AppState {
             ffmpeg_process: Mutex::new(None),
             output_path: Mutex::new(None),
+            audio_streams: Mutex::new(Vec::new()),
+            audio_is_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_schedules,
