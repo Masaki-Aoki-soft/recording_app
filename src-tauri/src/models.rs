@@ -37,6 +37,7 @@ pub struct RecordingConfig {
     pub capture_system_audio: bool,
     pub capture_mic: bool,
     pub audio_device: Option<String>,
+    pub mic_device: Option<String>,
 }
 
 impl Default for RecordingConfig {
@@ -47,6 +48,7 @@ impl Default for RecordingConfig {
             capture_system_audio: true,
             capture_mic: true,
             audio_device: None,
+            mic_device: None,
         }
     }
 }

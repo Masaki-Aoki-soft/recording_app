@@ -239,3 +239,158 @@ pub async fn get_recordings_dir() -> Result<String, String> {
         .to_string_lossy()
         .to_string())
 }
+
+/// 録音デバイスの一覧を取得
+#[tauri::command]
+pub async fn get_audio_devices() -> Result<Vec<String>, String> {
+    use std::process::Command;
+
+    let output = Command::new("ffmpeg")
+        .args(&["-list_devices", "true", "-f", "dshow", "-i", "dummy"])
+        .output()
+        .map_err(|e| format!("FFmpeg execution failed: {}", e))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut devices = Vec::new();
+    let mut in_audio_section = false;
+
+    for line in stderr.lines() {
+        if line.contains("DirectShow audio devices") {
+            in_audio_section = true;
+            continue;
+        }
+        if line.contains("DirectShow video devices") {
+            in_audio_section = false;
+            continue;
+        }
+        
+        if in_audio_section {
+            if line.contains("Alternative name") {
+                continue;
+            }
+            if let Some(start) = line.find('"') {
+                if let Some(end) = line[start + 1..].find('"') {
+                    let device_name = &line[start + 1..start + 1 + end];
+                    if !devices.contains(&device_name.to_string()) {
+                        devices.push(device_name.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(devices)
+}
+
+// =====================================================
+// FFmpeg 録画制御 (Rust)
+// =====================================================
+
+#[tauri::command]
+pub async fn start_recording(
+    config: RecordingConfig,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<String, String> {
+    use std::process::{Command, Stdio};
+    use std::os::windows::process::CommandExt;
+
+    {
+        let process_lock = state.ffmpeg_process.lock().unwrap();
+        if process_lock.is_some() {
+            return Err("Already recording".to_string());
+        }
+    }
+
+    let video_dir = get_recordings_dir().await?;
+    let timestamp = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+    let filepath = format!("{}\\MeetingRec_{}.mp4", video_dir, timestamp);
+
+    let mut args = vec!["-y".to_string()];
+    let resolution = match config.resolution.as_str() {
+        "720p" => "1280x720",
+        "4k" => "3840x2160",
+        _ => "1920x1080",
+    };
+
+    args.push("-f".to_string());
+    args.push("gdigrab".to_string());
+    args.push("-framerate".to_string());
+    args.push(config.framerate.to_string());
+    args.push("-video_size".to_string());
+    args.push(resolution.to_string());
+    args.push("-i".to_string());
+    args.push("desktop".to_string());
+
+    if config.capture_system_audio {
+        args.push("-f".to_string());
+        args.push("dshow".to_string());
+        if let Some(dev) = &config.audio_device {
+            args.push("-i".to_string());
+            args.push(format!("audio={}", dev));
+        } else {
+            args.push("-i".to_string());
+            args.push("audio=virtual-audio-capturer".to_string());
+        }
+    }
+
+    if config.capture_mic {
+        args.push("-f".to_string());
+        args.push("dshow".to_string());
+        if let Some(dev) = &config.mic_device {
+            args.push("-i".to_string());
+            args.push(format!("audio={}", dev));
+        } else {
+            args.push("-i".to_string());
+            args.push("audio=Microphone".to_string());
+        }
+    }
+
+    args.push("-pix_fmt".to_string());
+    args.push("yuv420p".to_string());
+    args.push("-vcodec".to_string());
+    args.push("libx264".to_string());
+    args.push("-preset".to_string());
+    args.push("ultrafast".to_string());
+    args.push("-tune".to_string());
+    args.push("zerolatency".to_string());
+    args.push("-acodec".to_string());
+    args.push("aac".to_string());
+    args.push("-b:a".to_string());
+    args.push("128k".to_string());
+    args.push(filepath.clone());
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let child = Command::new("ffmpeg")
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|e| format!("Failed to start FFmpeg: {}", e))?;
+
+    *state.ffmpeg_process.lock().unwrap() = Some(child);
+    *state.output_path.lock().unwrap() = Some(filepath.clone());
+
+    Ok(filepath)
+}
+
+#[tauri::command]
+pub async fn stop_recording(state: tauri::State<'_, crate::AppState>) -> Result<String, String> {
+    let mut process_lock = state.ffmpeg_process.lock().unwrap();
+    if let Some(mut child) = process_lock.take() {
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            let _ = stdin.write_all(b"q");
+            let _ = stdin.flush();
+        }
+        
+        // Wait for it to gracefully exit
+        let _ = child.wait();
+        
+        let path = state.output_path.lock().unwrap().take().unwrap_or_default();
+        return Ok(path);
+    }
+    
+    Err("Not recording".to_string())
+}

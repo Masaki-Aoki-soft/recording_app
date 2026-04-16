@@ -3,8 +3,14 @@ mod drive;
 mod models;
 mod scheduler;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::process::Child;
 use log::info;
+
+pub struct AppState {
+    pub ffmpeg_process: Mutex<Option<Child>>,
+    pub output_path: Mutex<Option<String>>,
+}
 use tauri::{
     Manager,
     WindowEvent,
@@ -24,6 +30,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(Arc::new(scheduler::SchedulerState::new()))
+        .manage(AppState {
+            ffmpeg_process: Mutex::new(None),
+            output_path: Mutex::new(None),
+        })
         .invoke_handler(tauri::generate_handler![
             commands::list_schedules,
             commands::add_schedule,
@@ -38,6 +48,9 @@ pub fn run() {
             commands::get_recording_config,
             commands::save_recording_config,
             commands::get_recordings_dir,
+            commands::get_audio_devices,
+            commands::start_recording,
+            commands::stop_recording,
         ])
         .setup(|app| {
             // --- システムトレイの設定 ---
