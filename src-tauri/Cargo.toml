@@ -16,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
+dotenvy = "0.15.7"
 
 [dependencies]
 serde_json = "1.0"
@@ -23,13 +24,27 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.10.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
-tauri-plugin-shell = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-store = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
 tokio = { version = "1", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.12", features = ["json", "multipart"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
 uuid = { version = "1", features = ["v4"] }
 dirs = "6"
-dotenvy = "0.15.7"
-dotenvy_macro = "0.15.7"
+cpal = "0.18"
+hound = "3.5"
+keyring = { version = "3", features = ["windows-native"] }
+sha2 = "0.10"
+base64 = "0.22"
+urlencoding = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-capture = "2"
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_System_Threading",
+  "Win32_System_Power",
+] }
