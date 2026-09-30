@@ -688,7 +688,7 @@ mod tests {
         let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
         assert_eq!(
             generate_code_challenge(verifier),
-            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGKSsnh5cM"
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
         );
         let v = generate_code_verifier();
         assert!(v.len() >= 43 && v.len() <= 128);

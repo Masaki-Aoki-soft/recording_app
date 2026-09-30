@@ -6,6 +6,7 @@ mod recorder;
 mod scheduler;
 mod session;
 mod settings;
+mod sso;
 mod zoom;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -49,7 +50,7 @@ impl AppFlags {
     }
 }
 
-fn show_main_window(app: &AppHandle) {
+pub(crate) fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
@@ -113,6 +114,7 @@ pub fn run() {
         .manage(Arc::new(scheduler::SchedulerState::new()))
         .manage(SessionManager::new())
         .manage(drive::UploadLock(tokio::sync::Mutex::new(())))
+        .manage(sso::SsoState::default())
         .invoke_handler(tauri::generate_handler![
             commands::list_schedules,
             commands::add_schedule,
@@ -137,6 +139,9 @@ pub fn run() {
             commands::get_drive_config,
             commands::set_drive_config,
             commands::upload_recording,
+            sso::sso_redirect_url,
+            sso::wait_for_sso_callback,
+            sso::cancel_sso,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

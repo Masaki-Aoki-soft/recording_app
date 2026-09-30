@@ -13,6 +13,7 @@ import toast from 'react-hot-toast';
 
 import AuthCard, { FieldError } from '@/components/auth/auth-card';
 import AuthGuard from '@/components/auth/auth-guard';
+import GoogleSsoButton from '@/components/auth/google-sso-button';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -139,6 +140,7 @@ function SignUpForm() {
                 </p>
             }
         >
+            <GoogleSsoButton label="Google で登録" />
             <form onSubmit={handleSubmit(onSubmitSignUp)} className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">

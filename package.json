@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@clerk/clerk-js": "^6.35.0",
     "@clerk/react": "^6.17.3",
     "@hookform/resolvers": "^5.2.2",
     "@tauri-apps/plugin-autostart": "~2.5.1",

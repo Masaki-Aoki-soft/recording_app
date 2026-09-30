@@ -180,6 +180,24 @@ export async function setSignedIn(signedIn: boolean): Promise<void> {
 }
 
 // =====================================================
+// ソーシャルログイン（Clerk SSO）
+// =====================================================
+
+/** Clerk の signIn.create に渡す redirectUrl（Rust のループバックサーバー） */
+export async function getSsoRedirectUrl(): Promise<string> {
+    return invoke<string>('sso_redirect_url');
+}
+
+/** 認証 URL をシステムブラウザで開き、Clerk からのコールバック URL を待つ */
+export async function waitForSsoCallback(authUrl: string): Promise<string> {
+    return invoke<string>('wait_for_sso_callback', { authUrl });
+}
+
+export async function cancelSso(): Promise<void> {
+    return invoke('cancel_sso');
+}
+
+// =====================================================
 // Google Drive API
 // =====================================================
 
