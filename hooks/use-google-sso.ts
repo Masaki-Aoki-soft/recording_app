@@ -38,8 +38,15 @@ export function useGoogleSso() {
             const callbackUrl = new URL(await waitForSsoCallback(authUrl.toString()));
             const nonce = callbackUrl.searchParams.get('rotating_token_nonce');
             if (!nonce) {
+                // 原因の切り分け用に、Clerk が返したパラメータ名（値は秘匿情報を含み得るので出さない）を記録
+                const keys = [...callbackUrl.searchParams.keys()];
+                console.error('SSO callback without rotating_token_nonce. params:', keys);
+                const clerkError =
+                    callbackUrl.searchParams.get('__clerk_status') ?? callbackUrl.searchParams.get('error');
                 throw new Error(
-                    'ログイン結果を受け取れませんでした。Clerk ダッシュボードでリダイレクト URL が許可されているか確認してください',
+                    `ログイン結果を受け取れませんでした（Clerk ダッシュボードの「Allowlist for mobile SSO redirect」に ${redirectUrl} が登録されているか確認してください）` +
+                        (clerkError ? ` [${clerkError}]` : '') +
+                        (keys.length ? ` 受信パラメータ: ${keys.join(', ')}` : ' 受信パラメータ: なし'),
                 );
             }
 

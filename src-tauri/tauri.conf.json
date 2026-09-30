@@ -29,8 +29,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "externalBin": ["bin/ffmpeg"],
+    "targets": [
+      "nsis"
+    ],
+    "externalBin": [
+      "bin/ffmpeg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -40,7 +44,19 @@
     ],
     "windows": {
       "nsis": {
-        "languages": ["Japanese", "English"]
+        "languages": [
+          "Japanese",
+          "English"
+        ]
+      }
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "meetingrec"
+        ]
       }
     }
   }

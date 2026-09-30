@@ -1,30 +1,50 @@
-//! Clerk のソーシャルログイン（Google SSO）用のループバック受信
+//! Clerk のソーシャルログイン（Google SSO）のコールバック受信
 //!
 //! Google は WebView 内での OAuth をブロックするため、認証はシステムブラウザで行う。
-//! Clerk は認証完了後に `redirectUrl`（ここで待ち受ける http://127.0.0.1:<PORT>/sso-callback）へ
-//! `rotating_token_nonce` 付きでリダイレクトするので、その URL をフロントへ返す。
-//! フロントは nonce を使って `signIn.reload({ rotatingTokenNonce })` でセッションを確定させる。
+//! Clerk は認証完了後に `redirectUrl`（カスタムスキーム `meetingrec://sso-callback`）へ
+//! `rotating_token_nonce` 付きでリダイレクトする。Windows はそれを新しいプロセスの引数として
+//! 起動するが、single-instance + deep-link プラグインが既存のプロセスへ転送するので、
+//! ここで受け取ってフロントへ返す。フロントは nonce で `signIn.reload({ rotatingTokenNonce })` を行う。
+//!
+//! Clerk はセキュリティ上、Clerk ダッシュボードの「Allowlist for mobile SSO redirect」に
+//! 登録された URL にしか nonce を付けない。
 
+use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 
-use log::info;
-use tauri::{AppHandle, State};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{Mutex, Notify};
+use log::{info, warn};
+use tauri::{AppHandle, State, Url};
+use tokio::sync::{oneshot, Mutex, Notify};
 
-/// Clerk ダッシュボードの「Allowlist for mobile SSO redirect」に登録する URL のポート
-const SSO_CALLBACK_PORT: u16 = 47615;
-const SSO_CALLBACK_PATH: &str = "/sso-callback";
+/// Clerk ダッシュボードの許可リストに登録する URL
+const SSO_SCHEME: &str = "meetingrec";
+const SSO_HOST: &str = "sso-callback";
 const SSO_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Default)]
 pub struct SsoState {
+    /// コールバック待ちの送信口（待ち受け中のみ Some）
+    pending: StdMutex<Option<oneshot::Sender<String>>>,
     cancel: Notify,
     in_progress: Mutex<()>,
 }
 
 fn redirect_url() -> String {
-    format!("http://127.0.0.1:{}{}", SSO_CALLBACK_PORT, SSO_CALLBACK_PATH)
+    format!("{}://{}", SSO_SCHEME, SSO_HOST)
+}
+
+/// deep link（meetingrec://...）を受け取ったときに呼ばれる
+pub fn handle_deep_link(state: &SsoState, url: &Url) {
+    if url.scheme() != SSO_SCHEME || url.host_str() != Some(SSO_HOST) {
+        warn!("Ignoring unexpected deep link: {}://{:?}", url.scheme(), url.host_str());
+        return;
+    }
+    match state.pending.lock().unwrap().take() {
+        Some(tx) => {
+            let _ = tx.send(url.to_string());
+        }
+        None => warn!("Received SSO callback but no login is in progress"),
+    }
 }
 
 /// signIn.create に渡す redirectUrl
@@ -48,26 +68,25 @@ pub async fn wait_for_sso_callback(
         .try_lock()
         .map_err(|_| "別のログイン処理が進行中です".to_string())?;
 
-    // ブラウザを開く前に待ち受けを開始する
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", SSO_CALLBACK_PORT))
-        .await
-        .map_err(|e| {
-            format!(
-                "ログイン用のポート {} を使用できません（他のアプリが使用中の可能性があります）: {}",
-                SSO_CALLBACK_PORT, e
-            )
-        })?;
+    // ブラウザを開く前に受け口を用意する
+    let (tx, rx) = oneshot::channel::<String>();
+    *state.pending.lock().unwrap() = Some(tx);
 
-    tauri_plugin_opener::open_url(&auth_url, None::<&str>)
-        .map_err(|e| format!("ブラウザを開けません: {}", e))?;
+    if let Err(e) = tauri_plugin_opener::open_url(&auth_url, None::<&str>) {
+        state.pending.lock().unwrap().take();
+        return Err(format!("ブラウザを開けません: {}", e));
+    }
     info!("Waiting for SSO callback on {}", redirect_url());
 
     let result = tokio::select! {
-        r = tokio::time::timeout(SSO_TIMEOUT, accept_callback(listener)) => {
-            r.map_err(|_| "ログインがタイムアウトしました".to_string())?
-        }
+        r = tokio::time::timeout(SSO_TIMEOUT, rx) => match r {
+            Ok(Ok(url)) => Ok(url),
+            Ok(Err(_)) => Err("ログイン結果を受け取れませんでした".to_string()),
+            Err(_) => Err("ログインがタイムアウトしました".to_string()),
+        },
         _ = state.cancel.notified() => Err("ログインをキャンセルしました".to_string()),
     };
+    state.pending.lock().unwrap().take();
 
     // 認証後はアプリのウィンドウを前面に戻す
     crate::show_main_window(&app);
@@ -80,59 +99,28 @@ pub fn cancel_sso(state: State<'_, SsoState>) {
     state.cancel.notify_waiters();
 }
 
-/// /sso-callback へのリクエストを受け取り、完全な URL を返す（favicon 等は読み飛ばす）
-async fn accept_callback(listener: tokio::net::TcpListener) -> Result<String, String> {
-    loop {
-        let (mut stream, _) = listener
-            .accept()
-            .await
-            .map_err(|e| format!("コールバックを受信できません: {}", e))?;
-
-        let mut buf = vec![0u8; 8192];
-        let n = stream.read(&mut buf).await.unwrap_or(0);
-        let request = String::from_utf8_lossy(&buf[..n]);
-        let Some(path) = request_path(&request) else {
-            continue;
-        };
-
-        if path != SSO_CALLBACK_PATH && !path.starts_with(&format!("{}?", SSO_CALLBACK_PATH)) {
-            let _ = stream
-                .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-                .await;
-            continue;
-        }
-
-        let body = "<html><head><meta charset=\"utf-8\"><title>MeetingRec</title></head>\
-            <body style=\"font-family:sans-serif;text-align:center;padding-top:3em\">\
-            <h2>MeetingRec</h2><p>ログイン処理が完了しました。このタブを閉じて MeetingRec に戻ってください。</p>\
-            <script>setTimeout(function(){window.close()},500)</script></body></html>";
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        let _ = stream.write_all(response.as_bytes()).await;
-
-        return Ok(format!("http://127.0.0.1:{}{}", SSO_CALLBACK_PORT, path));
-    }
-}
-
-/// HTTP リクエスト行からパス（クエリ含む）を取り出す
-fn request_path(request: &str) -> Option<&str> {
-    let mut parts = request.lines().next()?.split_whitespace();
-    (parts.next()? == "GET").then_some(())?;
-    parts.next()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::request_path;
+    use super::*;
+
+    #[tokio::test]
+    async fn delivers_matching_deep_link_to_pending_waiter() {
+        let state = SsoState::default();
+        let (tx, rx) = oneshot::channel();
+        *state.pending.lock().unwrap() = Some(tx);
+
+        // 関係ない URL は無視される
+        handle_deep_link(&state, &Url::parse("meetingrec://other?x=1").unwrap());
+        assert!(state.pending.lock().unwrap().is_some());
+
+        let url = Url::parse("meetingrec://sso-callback?rotating_token_nonce=abc").unwrap();
+        handle_deep_link(&state, &url);
+        assert_eq!(rx.await.unwrap(), "meetingrec://sso-callback?rotating_token_nonce=abc");
+        assert!(state.pending.lock().unwrap().is_none());
+    }
 
     #[test]
-    fn extracts_request_path() {
-        let req = "GET /sso-callback?rotating_token_nonce=abc HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
-        assert_eq!(request_path(req), Some("/sso-callback?rotating_token_nonce=abc"));
-        assert_eq!(request_path("POST / HTTP/1.1\r\n"), None);
-        assert_eq!(request_path(""), None);
+    fn redirect_url_uses_custom_scheme() {
+        assert_eq!(redirect_url(), "meetingrec://sso-callback");
     }
 }

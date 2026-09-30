@@ -97,10 +97,12 @@ fn quit_gracefully(app: &AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // 二重起動時は既存のウィンドウを表示する（最初に登録する必要がある）
+        // 二重起動時は既存のウィンドウを表示する（最初に登録する必要がある）。
+        // deep-link 機能により、meetingrec:// で起動された 2 つ目のプロセスの URL は既存のプロセスへ転送される
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
         }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
@@ -155,6 +157,23 @@ pub fn run() {
             });
 
             drive::migrate_legacy_tokens(&handle);
+
+            // --- Google ログイン（Clerk SSO）のコールバック用 deep link ---
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                // インストーラ経由でない起動（bun tauri dev など）でも meetingrec:// を
+                // 現在の実行ファイルに関連付ける（HKCU に登録）
+                if let Err(e) = app.deep_link().register_all() {
+                    warn!("Failed to register deep link scheme: {}", e);
+                }
+                let deep_link_handle = handle.clone();
+                app.deep_link().on_open_url(move |event| {
+                    let state = deep_link_handle.state::<sso::SsoState>();
+                    for url in event.urls() {
+                        sso::handle_deep_link(&state, &url);
+                    }
+                });
+            }
 
             // --- システムトレイ ---
             let show_item = MenuItemBuilder::with_id("show", "表示").build(app)?;
