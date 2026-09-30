@@ -2,74 +2,66 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useSignIn, useSignUp } from '@clerk/react/legacy';
+import { useSignIn } from '@clerk/react/legacy';
 import toast from 'react-hot-toast';
 
 import { clerkErrorMessage } from '@/lib/clerk-errors';
-import { cancelSso, errorMessage, getSsoRedirectUrl, isTauri, waitForSsoCallback } from '@/lib/tauri';
+import { cancelSso, errorMessage, isTauri } from '@/lib/tauri';
 
 /**
  * Clerk の Google ソーシャルログイン。
  *
- * Google は WebView 内の OAuth をブロックするため、認証はシステムブラウザで行い、
- * Clerk が Rust のループバックサーバーへ返す rotating_token_nonce でセッションを確定する
- * （@clerk/expo の useSSO と同じフロー）。未登録のユーザーはそのままサインアップに切り替える。
+ * Google は WebView 内の OAuth をブロックするため、ClerkProvider に登録した OAuth transport
+ * （lib/clerk-native.ts）経由でシステムブラウザで認証し、deep link（meetingrec://sso-callback）で
+ * アプリに戻す。コールバック後の reload・セッション確定・未登録ユーザーのサインアップ移行は clerk-js が行う。
  */
 export function useGoogleSso() {
-    const { isLoaded: signInLoaded, signIn, setActive } = useSignIn();
-    const { isLoaded: signUpLoaded, signUp } = useSignUp();
+    const { isLoaded, signIn } = useSignIn();
     const router = useRouter();
     const [pending, setPending] = useState(false);
 
     const start = async () => {
-        if (!signInLoaded || !signUpLoaded || pending) return;
+        if (!isLoaded || pending) return;
         if (!isTauri()) {
             toast.error('Google ログインはデスクトップアプリでのみ利用できます');
             return;
         }
 
         setPending(true);
+        let completed = false;
+        // セッション確定以外の遷移（追加の本人確認が必要な場合など）の行き先
+        let unsupportedStep: string | null = null;
+
         try {
-            const redirectUrl = await getSsoRedirectUrl();
-            const attempt = await signIn.create({ strategy: 'oauth_google', redirectUrl });
-            const authUrl = attempt.firstFactorVerification.externalVerificationRedirectURL;
-            if (!authUrl) throw new Error('Google の認証 URL を取得できませんでした');
+            // redirectUrl / redirectUrlComplete は transport の deep link で上書きされる
+            await signIn.authenticateWithRedirect({
+                strategy: 'oauth_google',
+                redirectUrl: '/dashboard',
+                redirectUrlComplete: '/dashboard',
+                __internal_callbackParams: {
+                    signInUrl: '/login',
+                    signUpUrl: '/sign-up',
+                    __internal_navigateOnSetActive: async () => {
+                        completed = true;
+                    },
+                    __internal_navigate: async (to: string) => {
+                        unsupportedStep = to;
+                    },
+                },
+            } as Parameters<typeof signIn.authenticateWithRedirect>[0]);
 
-            const callbackUrl = new URL(await waitForSsoCallback(authUrl.toString()));
-            const nonce = callbackUrl.searchParams.get('rotating_token_nonce');
-            if (!nonce) {
-                // 原因の切り分け用に、Clerk が返したパラメータ名（値は秘匿情報を含み得るので出さない）を記録
-                const keys = [...callbackUrl.searchParams.keys()];
-                console.error('SSO callback without rotating_token_nonce. params:', keys);
-                const clerkError =
-                    callbackUrl.searchParams.get('__clerk_status') ?? callbackUrl.searchParams.get('error');
-                throw new Error(
-                    `ログイン結果を受け取れませんでした（Clerk ダッシュボードの「Allowlist for mobile SSO redirect」に ${redirectUrl} が登録されているか確認してください）` +
-                        (clerkError ? ` [${clerkError}]` : '') +
-                        (keys.length ? ` 受信パラメータ: ${keys.join(', ')}` : ' 受信パラメータ: なし'),
-                );
+            if (completed) {
+                toast.success('Google アカウントでログインしました');
+                router.replace('/dashboard');
+            } else if (unsupportedStep) {
+                console.warn('SSO requires an additional step:', unsupportedStep);
+                toast.error('このアカウントは追加の認証が必要です。メールアドレスとパスワードでログインしてください');
+            } else {
+                toast.error('ログインを完了できませんでした。もう一度お試しください');
             }
-
-            const reloaded = await attempt.reload({ rotatingTokenNonce: nonce });
-
-            let sessionId = reloaded.createdSessionId;
-            if (reloaded.firstFactorVerification.status === 'transferable') {
-                // Google アカウントに対応するユーザーがいない → 新規登録に切り替える
-                const created = await signUp.create({ transfer: true });
-                sessionId = created.createdSessionId;
-                if (created.status !== 'complete') {
-                    throw new Error('アカウント作成に追加の情報が必要です。Clerk の必須項目の設定を確認してください');
-                }
-            } else if (reloaded.status !== 'complete') {
-                throw new Error('追加の認証が必要なアカウントです。メールアドレスとパスワードでログインしてください');
-            }
-
-            if (!sessionId) throw new Error('セッションを作成できませんでした');
-            await setActive({ session: sessionId });
-            toast.success('Google アカウントでログインしました');
-            router.replace('/dashboard');
         } catch (err) {
-            const message = typeof err === 'string' ? errorMessage(err) : clerkErrorMessage(err, 'Google ログインに失敗しました');
+            const message =
+                typeof err === 'string' ? errorMessage(err) : clerkErrorMessage(err, 'Google ログインに失敗しました');
             toast.error(message);
         } finally {
             setPending(false);
@@ -80,5 +72,5 @@ export function useGoogleSso() {
         cancelSso().catch(console.error);
     };
 
-    return { start, cancel, pending, ready: signInLoaded && signUpLoaded };
+    return { start, cancel, pending, ready: isLoaded };
 }

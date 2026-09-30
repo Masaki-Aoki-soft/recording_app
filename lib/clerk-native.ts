@@ -11,7 +11,19 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { Clerk as ClerkType } from '@clerk/clerk-js';
 
-import { isTauri } from '@/lib/tauri';
+import { getSsoRedirectUrl, isTauri, waitForSsoCallback } from '@/lib/tauri';
+
+/**
+ * clerk-js の OAuth transport（Electron / Tauri のように同一ドキュメントでのリダイレクトや
+ * ポップアップが使えない環境向けの仕組み）。`authenticateWithRedirect` 実行時に Clerk が
+ * - `getRedirectUrl` の URL（deep link: meetingrec://sso-callback）を FAPI のリダイレクト先にし、
+ * - `open` で認証 URL をシステムブラウザで開いてコールバック URL を受け取り、
+ * - nonce の有無に応じた reload、セッション確定、未登録ユーザーのサインアップ移行までを行う。
+ */
+export const tauriOAuthTransport = {
+    getRedirectUrl: () => getSsoRedirectUrl(),
+    open: async (url: URL) => ({ callbackUrl: await waitForSsoCallback(url.toString()) }),
+};
 
 /** クライアントトークンの保存キー（WebView の localStorage に保存） */
 const CLIENT_JWT_KEY = 'meetingrec.clerk.client_jwt';

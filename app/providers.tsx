@@ -6,7 +6,7 @@ import type { Clerk } from '@clerk/clerk-js';
 import { Loader2 } from 'lucide-react';
 import { Toaster } from 'react-hot-toast';
 
-import { createNativeClerk } from '@/lib/clerk-native';
+import { createNativeClerk, tauriOAuthTransport } from '@/lib/clerk-native';
 import { isTauri, setSignedIn } from '@/lib/tauri';
 
 const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -59,6 +59,8 @@ export default function Providers({ children }: { children: React.ReactNode }) {
             Clerk={clerk}
             // Cookie を使わずヘッダでセッションを管理する（ネイティブモード）
             standardBrowser={false}
+            // ソーシャルログインはシステムブラウザ + deep link で行う
+            __internal_oauthTransport={isTauri() ? tauriOAuthTransport : undefined}
             afterSignOutUrl="/login"
         >
             <AuthStateSync />
