@@ -1,3 +1,4 @@
+mod clerk_proxy;
 mod commands;
 mod drive;
 mod ffmpeg;
@@ -142,6 +143,7 @@ pub fn run() {
             sso::sso_redirect_url,
             sso::wait_for_sso_callback,
             sso::cancel_sso,
+            clerk_proxy::clerk_fetch,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

@@ -54,7 +54,7 @@ src-tauri/bin/ffmpeg-x86_64-pc-windows-msvc.exe
 3. **Native applications**: 「Enable Native API」をオン
 4. **Native applications → Allowlist for mobile SSO redirect** に `http://127.0.0.1:47615/sso-callback` を追加
 
-アプリは Clerk を Expo SDK と同じ「ネイティブモード」（Cookie ではなく Authorization ヘッダでセッション管理）で動かします。Google は WebView 内の OAuth をブロックするため、「Google でログイン」はシステムブラウザで認証し、Clerk が上記のループバック URL に返す `rotating_token_nonce` でアプリ側のセッションを確定させます。ポート 47615 が他のアプリに使われているとログインできません。
+アプリは Clerk を Expo SDK と同じ「ネイティブモード」（Cookie ではなく Authorization ヘッダでセッション管理）で動かします。Clerk の API は `Origin` と `Authorization` の両方を持つリクエストを拒否するため、Clerk への通信は WebView ではなく Rust 側（`clerk_proxy.rs`）から送ります。送信先は `.env.local` の Publishable key から求めた Clerk のホストに限定しており、このキーはビルド時に Rust 側にも埋め込まれます（キーを変えたら再ビルドしてください）。Google は WebView 内の OAuth をブロックするため、「Google でログイン」はシステムブラウザで認証し、Clerk が上記のループバック URL に返す `rotating_token_nonce` でアプリ側のセッションを確定させます。ポート 47615 が他のアプリに使われているとログインできません。
 
 **Google Cloud の設定**: Drive API を有効化し、OAuth 同意画面のスコープに `drive.file` と `userinfo.email` を追加してください。
 
