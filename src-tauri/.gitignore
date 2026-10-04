@@ -5,3 +5,6 @@
 
 # API Secrets
 .env
+
+# FFmpeg sidecar (100MB 超のため git 管理外。README 参照)
+/bin/ffmpeg-*.exe

@@ -1,22 +1,26 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "MeetingRec",
+  "productName": "Auto Meeting Capture",
   "version": "0.1.0",
   "identifier": "com.meetingrec.app",
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "bun dev",
-    "beforeBuildCommand": "bun build"
+    "beforeDevCommand": "bun run dev",
+    "beforeBuildCommand": "bun run build"
   },
   "app": {
     "windows": [
       {
-        "title": "MeetingRec",
-        "width": 900,
-        "height": 700,
+        "label": "main",
+        "title": "Auto Meeting Capture",
+        "width": 960,
+        "height": 720,
+        "minWidth": 720,
+        "minHeight": 560,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "visible": false
       }
     ],
     "security": {
@@ -25,13 +29,35 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis"
+    ],
+    "externalBin": [
+      "bin/ffmpeg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "languages": [
+          "Japanese",
+          "English"
+        ]
+      }
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "meetingrec"
+        ]
+      }
+    }
   }
 }

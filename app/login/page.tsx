@@ -1,86 +1,202 @@
-/* ログインページ */
+/* ログインページ（Clerk: メールアドレス + パスワード） */
 
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { invoke } from '@tauri-apps/api/core';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Video } from 'lucide-react';
-import { FcGoogle } from 'react-icons/fc';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useSignIn } from '@clerk/react/legacy';
+import { Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+import AuthCard, { FieldError } from '@/components/auth/auth-card';
+import AuthGuard from '@/components/auth/auth-guard';
+import GoogleSsoButton from '@/components/auth/google-sso-button';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { clerkErrorMessage } from '@/lib/clerk-errors';
+import { autoConnectGoogleDrive } from '@/lib/drive-connect';
+import {
+    loginFormSchema,
+    verificationCodeSchema,
+    type LoginFormValues,
+    type VerificationCodeValues,
+} from '@/lib/validation';
+
 export default function LoginPage() {
-    const [isLoading, setIsLoading] = useState(false);
+    return (
+        <AuthGuard requireSignedOut>
+            <LoginForm />
+        </AuthGuard>
+    );
+}
+
+function LoginForm() {
+    const { isLoaded, signIn, setActive } = useSignIn();
     const router = useRouter();
+    // 新しい端末からのログインなどで追加のメール認証が必要な場合
+    const [needsCode, setNeedsCode] = useState(false);
 
-    const handleGoogleLogin = async () => {
-        setIsLoading(true);
+    const credentialsForm = useForm<LoginFormValues>({
+        resolver: zodResolver(loginFormSchema),
+        defaultValues: { email: '', password: '' },
+    });
+    const codeForm = useForm<VerificationCodeValues>({
+        resolver: zodResolver(verificationCodeSchema),
+        defaultValues: { code: '' },
+    });
 
-        await toast.promise(
-            new Promise<string>(async (resolve, reject) => {
-                try {
-                    await invoke('start_google_auth');
-
-                    resolve('ログインに成功しました');
-                    router.push('/dashboard');
-                } catch (error: any) {
-                    reject(error);
-                    // Rust側から返されたエラーメッセージがあれば表示
-                    const errorMessage =
-                        typeof error === 'string'
-                            ? error
-                            : 'ログインに失敗しました。再度お試しください。';
-                    reject(errorMessage);
-                } finally {
-                    setIsLoading(false);
-                }
-            }),
-            {
-                loading: 'ログイン中...',
-                success: (message: string) => message,
-                error: (message: string) => message,
-            }
-        );
+    const finish = async (sessionId: string | null) => {
+        if (!isLoaded || !sessionId) return;
+        await setActive({ session: sessionId });
+        toast.success('ログインしました');
+        void autoConnectGoogleDrive();
+        router.replace('/dashboard');
     };
 
-    return (
-        <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 p-4">
-            <Card className="w-full max-w-sm shadow-xl border-zinc-200/60 dark:border-zinc-800/60">
-                <CardHeader className="space-y-4 pb-6 pt-8">
-                    <div className="flex justify-center">
-                        <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-full">
-                            <Video className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                        </div>
-                    </div>
-                    <div className="space-y-2 text-center">
-                        <CardTitle className="text-2xl font-bold tracking-tight">
-                            ログイン
-                        </CardTitle>
-                        <CardDescription className="text-zinc-500 dark:text-zinc-400 text-sm">
-                            Google Driveへの保存を有効にするために
-                            <br />
-                            アカウントを連携してください
-                        </CardDescription>
-                    </div>
-                </CardHeader>
+    const onSubmitCredentials = async (values: LoginFormValues) => {
+        if (!isLoaded) return;
+        try {
+            const result = await signIn.create({
+                identifier: values.email,
+                password: values.password,
+            });
 
-                <CardContent className="pb-6">
-                    <Button
-                        variant="outline"
-                        className="cursor-pointer w-full h-12 text-base font-medium transition-all hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                        onClick={handleGoogleLogin}
-                        disabled={isLoading}
+            if (result.status === 'complete') {
+                await finish(result.createdSessionId);
+                return;
+            }
+
+            if (result.status === 'needs_second_factor' || result.status === 'needs_client_trust') {
+                const emailFactor = result.supportedSecondFactors?.find(
+                    (f) => f.strategy === 'email_code',
+                );
+                if (emailFactor && 'emailAddressId' in emailFactor) {
+                    await signIn.prepareSecondFactor({
+                        strategy: 'email_code',
+                        emailAddressId: emailFactor.emailAddressId,
+                    });
+                    setNeedsCode(true);
+                    toast.success('確認コードをメールで送信しました');
+                    return;
+                }
+            }
+
+            toast.error('このアカウントのログイン方法には対応していません');
+        } catch (err) {
+            toast.error(clerkErrorMessage(err, 'ログインに失敗しました'));
+        }
+    };
+
+    const onSubmitCode = async (values: VerificationCodeValues) => {
+        if (!isLoaded) return;
+        try {
+            const result = await signIn.attemptSecondFactor({
+                strategy: 'email_code',
+                code: values.code,
+            });
+            if (result.status === 'complete') {
+                await finish(result.createdSessionId);
+            } else {
+                toast.error('認証を完了できませんでした');
+            }
+        } catch (err) {
+            toast.error(clerkErrorMessage(err, '認証に失敗しました'));
+        }
+    };
+
+    if (needsCode) {
+        const { register, handleSubmit, formState } = codeForm;
+        return (
+            <AuthCard
+                title="確認コードの入力"
+                description={
+                    <>
+                        新しい端末からのログインです。
+                        <br />
+                        メールに届いた確認コードを入力してください。
+                    </>
+                }
+                footer={
+                    <button
+                        type="button"
+                        className="text-blue-600 hover:underline cursor-pointer"
+                        onClick={() => setNeedsCode(false)}
                     >
-                        {isLoading ? (
-                            <Loader2 className="mr-2 h-5 w-5 animate-spin text-zinc-500" />
-                        ) : (
-                            <FcGoogle className="mr-2 h-5 w-5" />
-                        )}
-                        {isLoading ? 'ブラウザで認証待ち...' : 'Googleでログイン'}
+                        ログイン画面に戻る
+                    </button>
+                }
+            >
+                <form onSubmit={handleSubmit(onSubmitCode)} className="space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="code">確認コード</Label>
+                        <Input
+                            id="code"
+                            inputMode="numeric"
+                            autoComplete="one-time-code"
+                            {...register('code')}
+                        />
+                        <FieldError message={formState.errors.code?.message} />
+                    </div>
+                    <Button type="submit" className="w-full h-11 cursor-pointer" disabled={formState.isSubmitting}>
+                        {formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        確認
                     </Button>
-                </CardContent>
-            </Card>
-        </div>
+                </form>
+            </AuthCard>
+        );
+    }
+
+    const { register, handleSubmit, formState } = credentialsForm;
+    return (
+        <AuthCard
+            title="ログイン"
+            description="Auto Meeting Capture のアカウントでログインしてください"
+            footer={
+                <>
+                    <p>
+                        <Link href="/forgot-password" className="text-blue-600 hover:underline">
+                            パスワードをお忘れの方
+                        </Link>
+                    </p>
+                    <p>
+                        アカウントをお持ちでない方は{' '}
+                        <Link href="/sign-up" className="text-blue-600 hover:underline">
+                            新規登録
+                        </Link>
+                    </p>
+                </>
+            }
+        >
+            <GoogleSsoButton />
+            <form onSubmit={handleSubmit(onSubmitCredentials)} className="space-y-4">
+                <div className="space-y-2">
+                    <Label htmlFor="email">メールアドレス</Label>
+                    <Input id="email" type="email" autoComplete="email" {...register('email')} />
+                    <FieldError message={formState.errors.email?.message} />
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="password">パスワード</Label>
+                    <Input
+                        id="password"
+                        type="password"
+                        autoComplete="current-password"
+                        {...register('password')}
+                    />
+                    <FieldError message={formState.errors.password?.message} />
+                </div>
+                <Button
+                    type="submit"
+                    className="w-full h-11 cursor-pointer bg-blue-600 hover:bg-blue-700 text-white"
+                    disabled={!isLoaded || formState.isSubmitting}
+                >
+                    {formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    ログイン
+                </Button>
+            </form>
+        </AuthCard>
     );
 }

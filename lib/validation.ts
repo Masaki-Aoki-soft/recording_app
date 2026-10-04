@@ -1,31 +1,17 @@
 /* バリデーションスキーマ */
 
-'use client';
-
 import * as z from 'zod';
 
 // ログインフォームのバリデーションスキーマ定義
 export const loginFormSchema = z.object({
     email: z
         .string()
-        .nonempty('パスワードを入力してください')
+        .nonempty('メールアドレスを入力してください')
         .email({ message: '有効なメールアドレスを入力してください' }),
     password: z.string().min(6, { message: 'パスワードは6文字以上で入力してください' }),
 });
 
 export type LoginFormValues = z.infer<typeof loginFormSchema>;
-
-// デバイス登録フォームのバリデーションスキーマ定義
-export const deviceSchema = z.object({
-    name: z.string().nonempty('デバイス名は必須です'),
-    macAddress: z
-        .string()
-        .nonempty('MACアドレスは必須です')
-        .regex(/^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/, '無効なMACアドレス形式です'),
-    description: z.string().optional(),
-});
-
-export type DeviceFormValues = z.infer<typeof deviceSchema>;
 
 // パスワード再設定フォーム用バリデーション
 export const forgotPasswordSchema = z.object({
@@ -72,3 +58,33 @@ export const signUpFormSchema = z
     });
 
 export type SignUpFormValues = z.infer<typeof signUpFormSchema>;
+
+// メールで届く確認コード
+export const verificationCodeSchema = z.object({
+    code: z
+        .string()
+        .trim()
+        .nonempty('確認コードを入力してください')
+        .min(6, '確認コードは6桁です'),
+});
+
+export type VerificationCodeValues = z.infer<typeof verificationCodeSchema>;
+
+// Zoom 会議 URL（Rust 側の zoom::parse_meeting_url と同じ判定）
+const ZOOM_HTTP_URL = /^https?:\/\/([a-z0-9-]+\.)*(zoom\.us|zoomgov\.com)(:\d+)?\/(j|w|s|wc\/join|wc)\/\d{9,}/i;
+const ZOOM_PROTOCOL_URL = /^(zoommtg|zoomus):\/\/.*[?&]confno=\d{9,}/i;
+
+export function isZoomMeetingUrl(url: string): boolean {
+    const value = url.trim();
+    return ZOOM_HTTP_URL.test(value) || ZOOM_PROTOCOL_URL.test(value);
+}
+
+// スケジュール登録フォーム
+export const scheduleFormSchema = z.object({
+    name: z.string().trim().nonempty('会議名を入力してください'),
+    url: z
+        .string()
+        .trim()
+        .nonempty('会議URLを入力してください')
+        .refine(isZoomMeetingUrl, 'Zoom の会議URL（https://zoom.us/j/... など）を入力してください'),
+});
