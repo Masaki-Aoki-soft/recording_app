@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
-import { AlertCircle, AlertTriangle, CheckCircle, CloudUpload, Info, Loader2, Power, Video } from 'lucide-react';
+import { AlertCircle, CheckCircle, CloudUpload, Info, Loader2, Power, Video } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import { Badge } from '@/components/ui/badge';
@@ -124,15 +124,6 @@ export default function SettingsTab() {
                 <h2 className="text-2xl md:text-3xl font-bold tracking-tight">設定・アカウント</h2>
                 <p className="text-sm md:text-base text-zinc-500 mt-2">
                     Zoom 参加・録画品質・保存先の設定を行います。
-                </p>
-            </div>
-
-            {/* 録画の同意 */}
-            <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 p-4 text-sm text-amber-900 dark:text-amber-200">
-                <AlertTriangle className="h-5 w-5 shrink-0" />
-                <p>
-                    会議を録画する際は、事前に主催者・参加者の同意を得てください。本アプリは画面キャプチャで録画するため、Zoom
-                    の録画通知は他の参加者に表示されません。
                 </p>
             </div>
 

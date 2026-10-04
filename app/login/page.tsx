@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { clerkErrorMessage } from '@/lib/clerk-errors';
+import { autoConnectGoogleDrive } from '@/lib/drive-connect';
 import {
     loginFormSchema,
     verificationCodeSchema,
@@ -52,6 +53,7 @@ function LoginForm() {
         if (!isLoaded || !sessionId) return;
         await setActive({ session: sessionId });
         toast.success('ログインしました');
+        void autoConnectGoogleDrive();
         router.replace('/dashboard');
     };
 
@@ -152,7 +154,7 @@ function LoginForm() {
     return (
         <AuthCard
             title="ログイン"
-            description="MeetingRec のアカウントでログインしてください"
+            description="Auto Meeting Capture のアカウントでログインしてください"
             footer={
                 <>
                     <p>

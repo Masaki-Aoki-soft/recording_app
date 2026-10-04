@@ -258,11 +258,11 @@ async fn wait_for_auth_code(
             (Some(_), _) if extract_query_param(&request, "state").as_deref() != Some(expected_state) => {
                 (false, "不正なリクエストです（state 不一致）")
             }
-            (Some(_), _) => (true, "認証に成功しました。このタブを閉じて MeetingRec に戻ってください。"),
-            _ => (false, "認証がキャンセルされました。MeetingRec に戻ってやり直してください。"),
+            (Some(_), _) => (true, "認証に成功しました。このタブを閉じて Auto Meeting Capture に戻ってください。"),
+            _ => (false, "認証がキャンセルされました。Auto Meeting Capture に戻ってやり直してください。"),
         };
         let body = format!(
-            "<html><head><meta charset=\"utf-8\"></head><body style=\"font-family:sans-serif;text-align:center;padding-top:3em\"><h2>MeetingRec</h2><p>{}</p></body></html>",
+            "<html><head><meta charset=\"utf-8\"></head><body style=\"font-family:sans-serif;text-align:center;padding-top:3em\"><h2>Auto Meeting Capture</h2><p>{}</p></body></html>",
             message
         );
         let response = format!(

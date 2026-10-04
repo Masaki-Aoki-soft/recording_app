@@ -88,7 +88,7 @@ pub struct GeneralSettings {
 impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
-            zoom_display_name: "MeetingRec".to_string(),
+            zoom_display_name: "Auto Meeting Capture".to_string(),
             lead_seconds: 60,
             wait_timeout_minutes: 30,
         }

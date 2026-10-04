@@ -13,7 +13,13 @@ import SettingsTab from '@/components/dashboard/settings-tab';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { useElapsedSeconds, useSessionStatus } from '@/hooks/use-session-status';
-import { formatElapsedTime, isTauri, onUploadProgress, setSignedIn } from '@/lib/tauri';
+import {
+    disconnectGoogleDrive,
+    formatElapsedTime,
+    isTauri,
+    onUploadProgress,
+    setSignedIn,
+} from '@/lib/tauri';
 
 type Tab = 'record' | 'schedule' | 'settings';
 
@@ -79,7 +85,11 @@ function Dashboard() {
             return;
         }
         try {
-            if (isTauri()) await setSignedIn(false);
+            if (isTauri()) {
+                // 次にログインする人のアップロード先にならないよう、先に Drive の連携を解除する
+                await disconnectGoogleDrive();
+                await setSignedIn(false);
+            }
             await signOut({ redirectUrl: '/login' });
             toast.success('ログアウトしました');
         } catch (err) {
@@ -120,7 +130,7 @@ function Dashboard() {
                 </div>
 
                 <h1 className="ml-4 text-xl font-bold flex items-center gap-2 text-zinc-900 dark:text-zinc-50">
-                    <Video className="text-blue-600 h-6 w-6" /> MeetingRec
+                    <Video className="text-blue-600 h-6 w-6" /> Auto Meeting Capture
                 </h1>
 
                 {/* 録画中インジケーター */}

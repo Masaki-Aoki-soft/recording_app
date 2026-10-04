@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MeetingRec",
+  title: "Auto Meeting Capture",
   description: "Zoom 会議の自動参加・自動録画アプリ",
 };
 

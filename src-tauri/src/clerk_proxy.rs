@@ -61,7 +61,7 @@ fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .user_agent(concat!("MeetingRec/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("AutoMeetingCapture/", env!("CARGO_PKG_VERSION")))
             .build()
             .expect("failed to build HTTP client")
     })

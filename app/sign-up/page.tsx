@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { clerkErrorMessage } from '@/lib/clerk-errors';
+import { autoConnectGoogleDrive } from '@/lib/drive-connect';
 import {
     signUpFormSchema,
     verificationCodeSchema,
@@ -71,6 +72,7 @@ function SignUpForm() {
             if (result.status === 'complete') {
                 await setActive({ session: result.createdSessionId });
                 toast.success('アカウントを作成しました');
+                void autoConnectGoogleDrive();
                 router.replace('/dashboard');
             } else {
                 toast.error('登録を完了できませんでした。入力内容を確認してください');
@@ -130,7 +132,7 @@ function SignUpForm() {
     return (
         <AuthCard
             title="新規登録"
-            description="MeetingRec のアカウントを作成します"
+            description="Auto Meeting Capture のアカウントを作成します"
             footer={
                 <p>
                     既にアカウントをお持ちの方は{' '}

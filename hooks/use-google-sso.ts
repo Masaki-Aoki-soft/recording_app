@@ -6,6 +6,7 @@ import { useSignIn } from '@clerk/react/legacy';
 import toast from 'react-hot-toast';
 
 import { clerkErrorMessage } from '@/lib/clerk-errors';
+import { autoConnectGoogleDrive } from '@/lib/drive-connect';
 import { cancelSso, errorMessage, isTauri } from '@/lib/tauri';
 
 /**
@@ -52,6 +53,7 @@ export function useGoogleSso() {
 
             if (completed) {
                 toast.success('Google アカウントでログインしました');
+                void autoConnectGoogleDrive();
                 router.replace('/dashboard');
             } else if (unsupportedStep) {
                 console.warn('SSO requires an additional step:', unsupportedStep);

@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "MeetingRec",
+  "productName": "Auto Meeting Capture",
   "version": "0.1.0",
   "identifier": "com.meetingrec.app",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "MeetingRec",
+        "title": "Auto Meeting Capture",
         "width": 960,
         "height": 720,
         "minWidth": 720,

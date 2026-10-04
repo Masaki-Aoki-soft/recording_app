@@ -1,7 +1,7 @@
 [package]
 name = "app"
 version = "0.1.0"
-description = "MeetingRec - Automated Meeting Recording App"
+description = "Auto Meeting Capture - Automated Meeting Recording App"
 authors = ["you"]
 license = ""
 repository = ""

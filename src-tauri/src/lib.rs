@@ -73,7 +73,7 @@ pub fn update_tray(app: &AppHandle, status: &SessionStatus) {
         SessionState::Uploading => "アップロード中",
         SessionState::Error => "エラー",
     };
-    let _ = tray.set_tooltip(Some(format!("MeetingRec - {}", label)));
+    let _ = tray.set_tooltip(Some(format!("Auto Meeting Capture - {}", label)));
 }
 
 /// 録画中なら安全に停止・保存してから終了する
@@ -184,7 +184,7 @@ pub fn run() {
                 .build()?;
 
             let mut tray = TrayIconBuilder::with_id(TRAY_ID)
-                .tooltip("MeetingRec - 待機中")
+                .tooltip("Auto Meeting Capture - 待機中")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
@@ -229,7 +229,7 @@ pub fn run() {
                 warn!("Bundled ffmpeg.exe not found; falling back to ffmpeg on PATH");
             }
 
-            info!("MeetingRec app started successfully");
+            info!("Auto Meeting Capture app started successfully");
             Ok(())
         })
         .on_window_event(|window, event| {
